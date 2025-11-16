@@ -8,8 +8,15 @@ This script does 5 things:
 4. Trains models with time-series CV
 5. Runs SHAP analysis
 
+After Step 3, saves enhanced dataset to: data_enhanced_with_changes.csv
+This file includes all NLP features + change detection + DFF reactions.
+
 Usage:
     python run_analysis.py
+
+To skip Steps 1-3 next time:
+    - Load data_enhanced_with_changes.csv directly
+    - Jump to Step 4 (model training)
 """
 
 import pandas as pd
@@ -283,6 +290,15 @@ try:
 except Exception as e:
     print(f"✗ Error fetching FRED data: {e}")
     print("  Continuing without DFF features...")
+
+# Save enhanced dataset
+print("\nSaving enhanced dataset with all features...")
+# Drop the Text column to save space (it's large and not needed for modeling)
+df_to_save = df.drop(columns=['Text'], errors='ignore')
+df_to_save.to_csv('data_enhanced_with_changes.csv', index=False)
+print(f"✓ Saved to 'data_enhanced_with_changes.csv'")
+print(f"  Shape: {df_to_save.shape[0]} rows x {df_to_save.shape[1]} columns")
+print(f"  Includes: NLP features + change detection + DFF reactions")
 
 
 # ============================================================================
