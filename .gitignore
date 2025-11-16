@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (keep in .gitignore, user provides these)
+communications.csv
+data_with_gpt_bart_finbert.csv
+gpt_hawk_scores.csv
+X_merged.csv
+Data_with_gpt_ranks.csv
+
+# Generated output files
+historical_intraday_returns.csv
+intraday_returns.csv
+statements_with_intraday.csv
+model_results.csv
+feature_importance.csv
+*.png
+*.pdf
+
+# OS
+.DS_Store
+Thumbs.db
