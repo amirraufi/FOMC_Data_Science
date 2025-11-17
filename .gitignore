@@ -44,6 +44,9 @@ gpt_hawk_scores.csv
 X_merged.csv
 Data_with_gpt_ranks.csv
 
+# External repositories (downloaded dependencies)
+fomc_statements_repo/
+
 # Generated output files
 historical_intraday_returns.csv
 intraday_returns.csv
