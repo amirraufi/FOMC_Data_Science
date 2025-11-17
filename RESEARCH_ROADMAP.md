@@ -484,6 +484,6 @@ Good luck with your research!
 
 **Questions?** Refer back to:
 - Technical details → `FOMC_Enhanced_Research.ipynb`
-- Usage guide → `ENHANCED_README.md`
-- Quick test → `quick_start_example.py`
+- Usage guide → `README.md`
+- Quick test → `python run_analysis.py`
 - This roadmap → `RESEARCH_ROADMAP.md`
