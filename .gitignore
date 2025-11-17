@@ -54,6 +54,7 @@ statements_with_intraday.csv
 model_results.csv
 feature_importance.csv
 data_enhanced_with_changes.csv
+*.CORRUPTED.backup
 *.log
 *.png
 *.pdf
