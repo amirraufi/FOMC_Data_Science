@@ -213,6 +213,10 @@ try:
     comm_df = pd.read_csv('communications.csv')
     comm_df['Date'] = pd.to_datetime(comm_df['Date'])
 
+    # Filter to ONLY Statements (not Minutes)
+    comm_df = comm_df[comm_df['Type'] == 'Statement'].copy()
+    print(f"  Filtered to {len(comm_df)} Statements (excluded Minutes)")
+
     # Merge to get text
     df = df.merge(comm_df[['Date', 'Text']], on='Date', how='left')
     print(f"✓ Merged with communications data")
