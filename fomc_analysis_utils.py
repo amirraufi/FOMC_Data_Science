@@ -536,6 +536,253 @@ class SubtleLinguisticAnalyzer:
         return features
 
 
+class DiagnosticAnalyzer:
+    """
+    Diagnostic analysis for FOMC statements
+
+    Instead of point predictions, provide:
+    1. Percentile scoring (how hawkish vs history)
+    2. Change highlighting (what changed linguistically)
+    3. Nearest neighbor retrieval (similar past episodes)
+    """
+
+    @staticmethod
+    def compute_hawkishness_percentile(current_score, historical_scores):
+        """
+        Score current statement relative to historical distribution
+
+        Args:
+            current_score: Current hawkishness score (e.g., gpt_hawk_score)
+            historical_scores: Array of historical scores
+
+        Returns:
+            Percentile (0-100) where higher = more hawkish
+        """
+        if pd.isna(current_score):
+            return np.nan
+
+        percentile = (historical_scores < current_score).mean() * 100
+        return percentile
+
+    @staticmethod
+    def create_composite_hawkishness(df):
+        """
+        Create composite hawkishness score from multiple NLP features
+
+        Combines GPT-4, BART, FinBERT into single score
+        """
+        scores = []
+
+        # GPT-4 score (normalize to 0-1)
+        if 'gpt_hawk_score' in df.columns:
+            gpt_norm = (df['gpt_hawk_score'] + 2) / 4  # -2 to +2 → 0 to 1
+            scores.append(gpt_norm)
+
+        # BART hawk probability
+        if 'bart_hawk_prob' in df.columns:
+            scores.append(df['bart_hawk_prob'])
+
+        # FinBERT (positive - negative)
+        if 'finbert_pos' in df.columns and 'finbert_neg' in df.columns:
+            finbert_score = (df['finbert_pos'] - df['finbert_neg'] + 1) / 2  # -1 to +1 → 0 to 1
+            scores.append(finbert_score)
+
+        # Average available scores
+        if len(scores) > 0:
+            composite = np.mean(scores, axis=0)
+        else:
+            composite = np.nan
+
+        return composite
+
+    @staticmethod
+    def find_nearest_neighbors(current_features, historical_features, k=5, metric='cosine'):
+        """
+        Find k most similar historical statements
+
+        Args:
+            current_features: Feature vector for current statement
+            historical_features: DataFrame of historical feature vectors
+            k: Number of neighbors to return
+            metric: 'cosine' or 'euclidean'
+
+        Returns:
+            Indices of k nearest neighbors (most recent first if tied)
+        """
+        from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
+
+        # Convert to numpy arrays
+        current = np.array(current_features).reshape(1, -1)
+        historical = np.array(historical_features)
+
+        # Compute similarities
+        if metric == 'cosine':
+            similarities = cosine_similarity(current, historical)[0]
+            # Higher is more similar
+            neighbor_indices = np.argsort(similarities)[::-1][:k]
+        else:  # euclidean
+            distances = euclidean_distances(current, historical)[0]
+            # Lower is more similar
+            neighbor_indices = np.argsort(distances)[:k]
+
+        return neighbor_indices
+
+    @staticmethod
+    def highlight_key_changes(changes_dict):
+        """
+        Extract most important changes for display
+
+        Args:
+            changes_dict: Dictionary from SubtleLinguisticAnalyzer.analyze_all()
+
+        Returns:
+            List of human-readable change descriptions
+        """
+        highlights = []
+
+        # Word substitutions (most important!)
+        if changes_dict.get('subtle_inflation_duration_intensity_change', 0) != 0:
+            change = changes_dict['subtle_inflation_duration_intensity_change']
+            if change > 0:
+                highlights.append(f"Inflation language shifted toward 'persistent' (+{change} intensity)")
+            else:
+                highlights.append(f"Inflation language shifted toward 'transitory' ({change} intensity)")
+
+        if changes_dict.get('subtle_policy_stance_intensity_change', 0) != 0:
+            change = changes_dict['subtle_policy_stance_intensity_change']
+            if change > 0:
+                highlights.append(f"Policy stance shifted toward 'expeditious' (+{change} intensity)")
+            else:
+                highlights.append(f"Policy stance shifted toward 'patient' ({change} intensity)")
+
+        # Hedge vs certainty
+        if changes_dict.get('subtle_hedge_word_count_change', 0) < 0:
+            highlights.append(f"Reduced hedging language ({changes_dict['subtle_hedge_word_count_change']} fewer hedge words)")
+        elif changes_dict.get('subtle_hedge_word_count_change', 0) > 0:
+            highlights.append(f"Increased hedging language (+{changes_dict['subtle_hedge_word_count_change']} hedge words)")
+
+        if changes_dict.get('subtle_certainty_word_count_change', 0) > 0:
+            highlights.append(f"Increased certainty language (+{changes_dict['subtle_certainty_word_count_change']} certainty words)")
+
+        # Negation
+        if changes_dict.get('subtle_negation_count_change', 0) != 0:
+            change = changes_dict['subtle_negation_count_change']
+            if change > 0:
+                highlights.append(f"Added negations (+{change} 'not'/'no' words - meaning reversal!)")
+            else:
+                highlights.append(f"Removed negations ({change} fewer 'not'/'no' words)")
+
+        # Intensifiers
+        if changes_dict.get('subtle_net_intensity_change', 0) > 0:
+            highlights.append(f"Language became more intense (+{changes_dict['subtle_net_intensity_change']} intensifiers)")
+        elif changes_dict.get('subtle_net_intensity_change', 0) < 0:
+            highlights.append(f"Language became less intense ({changes_dict['subtle_net_intensity_change']} diminishers)")
+
+        # Tense changes
+        if changes_dict.get('subtle_future_tense_count_change', 0) > 0:
+            highlights.append(f"Increased forward guidance (+{changes_dict['subtle_future_tense_count_change']} future tense)")
+
+        return highlights
+
+
+class ProbabilisticPredictor:
+    """
+    Probabilistic predictions instead of point estimates
+
+    Provides:
+    1. Conditional distributions (based on similar past episodes)
+    2. Quantile predictions (10th, 50th, 90th percentiles)
+    3. Tail risk estimates (prob of extreme moves)
+    """
+
+    @staticmethod
+    def conditional_distribution(current_features, historical_df, feature_cols, target='dy2_1d_bp', k=20):
+        """
+        Compute conditional distribution based on nearest neighbors
+
+        Args:
+            current_features: Feature vector for current statement
+            historical_df: DataFrame with features and outcomes
+            feature_cols: List of feature column names
+            target: Target variable (yield change)
+            k: Number of nearest neighbors to use
+
+        Returns:
+            Dictionary with quantiles and tail probabilities
+        """
+        # Find nearest neighbors
+        historical_features = historical_df[feature_cols].fillna(0)
+        neighbor_indices = DiagnosticAnalyzer.find_nearest_neighbors(
+            current_features, historical_features, k=k
+        )
+
+        # Get outcomes for similar statements
+        similar_outcomes = historical_df.iloc[neighbor_indices][target].dropna()
+
+        if len(similar_outcomes) == 0:
+            return None
+
+        # Compute quantiles
+        quantiles = similar_outcomes.quantile([0.1, 0.25, 0.5, 0.75, 0.9])
+
+        # Tail probabilities
+        tail_up_10 = (similar_outcomes > 10).mean()
+        tail_down_10 = (similar_outcomes < -10).mean()
+        prob_positive = (similar_outcomes > 0).mean()
+
+        return {
+            'median': quantiles[0.5],
+            'q10': quantiles[0.1],
+            'q25': quantiles[0.25],
+            'q75': quantiles[0.75],
+            'q90': quantiles[0.9],
+            'mean': similar_outcomes.mean(),
+            'std': similar_outcomes.std(),
+            'tail_up_10bp': tail_up_10,
+            'tail_down_10bp': tail_down_10,
+            'prob_positive': prob_positive,
+            'n_neighbors': len(similar_outcomes)
+        }
+
+    @staticmethod
+    def format_probabilistic_forecast(dist_dict, target_name="2Y Treasury"):
+        """
+        Format conditional distribution as human-readable text
+
+        Args:
+            dist_dict: Output from conditional_distribution()
+            target_name: Name of target (e.g., "2Y Treasury")
+
+        Returns:
+            Formatted string for display
+        """
+        if dist_dict is None:
+            return "Insufficient data for probabilistic forecast"
+
+        forecast = f"""
+📊 CONDITIONAL FORECAST - {target_name} (1-day change)
+
+Based on {dist_dict['n_neighbors']} most similar historical statements:
+
+Central Tendency:
+  Median outcome: {dist_dict['median']:+.1f} bp
+  Mean outcome: {dist_dict['mean']:+.1f} bp (±{dist_dict['std']:.1f} bp std)
+
+Likely Range:
+  50% interval: [{dist_dict['q25']:+.1f}, {dist_dict['q75']:+.1f}] bp
+  80% interval: [{dist_dict['q10']:+.1f}, {dist_dict['q90']:+.1f}] bp
+
+Directional Probability:
+  Prob(yields rise): {dist_dict['prob_positive']:.0%}
+  Prob(yields fall): {1-dist_dict['prob_positive']:.0%}
+
+Tail Risks:
+  Prob(>+10bp surge): {dist_dict['tail_up_10bp']:.0%}
+  Prob(<-10bp drop): {dist_dict['tail_down_10bp']:.0%}
+"""
+        return forecast
+
+
 class TimeSeriesSplitter:
     """Create proper time-series train/validation/holdout splits"""
 
@@ -699,11 +946,13 @@ if __name__ == "__main__":
     print("  - FOMCDataLoader: Load communications and market data")
     print("  - MarketReactionCalculator: Calculate market reactions")
     print("  - ChangeDetector: Detect statement-to-statement changes (sentence-level)")
-    print("  - SubtleLinguisticAnalyzer: Detect word-level linguistic changes (NEW!)")
+    print("  - SubtleLinguisticAnalyzer: Detect word-level linguistic changes")
+    print("  - DiagnosticAnalyzer: Percentile scoring, change highlighting, nearest neighbors (NEW!)")
+    print("  - ProbabilisticPredictor: Conditional distributions, quantiles, tail risks (NEW!)")
     print("  - TimeSeriesSplitter: Create train/val/holdout splits")
     print("  - ModelEvaluator: Evaluate models with CV")
     print("\nExample usage:")
-    print("  from fomc_analysis_utils import FOMCDataLoader, ChangeDetector")
+    print("  from fomc_analysis_utils import FOMCDataLoader, DiagnosticAnalyzer")
     print("  loader = FOMCDataLoader('communications.csv')")
     print("  df = loader.load_communications()")
-    print("\nNEW: Word-level features now included automatically in ChangeDetector!")
+    print("\nNEW: Diagnostic & probabilistic analysis for sophisticated interpretation!")
