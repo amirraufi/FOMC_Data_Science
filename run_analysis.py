@@ -43,6 +43,9 @@ import nltk
 from nltk.tokenize import sent_tokenize
 from difflib import SequenceMatcher
 
+# Import word-level linguistic analyzer (NEW!)
+from fomc_analysis_utils import SubtleLinguisticAnalyzer
+
 # Download NLTK data if needed
 try:
     nltk.data.find('tokenizers/punkt')
@@ -64,13 +67,23 @@ print("\n" + "="*70)
 print("STEP 1: LOADING DATA")
 print("="*70)
 
-# Load existing features
-print("\nLoading data_with_gpt_bart_finbert.csv...")
-df = pd.read_csv('data_with_gpt_bart_finbert.csv')
+# Load existing features - try multiple sources
+print("\nAttempting to load data...")
+try:
+    # Try original NLP-enhanced data first
+    print("  Trying data_with_gpt_bart_finbert.csv...")
+    df = pd.read_csv('data_with_gpt_bart_finbert.csv')
+    print("  ✓ Loaded base NLP data")
+except FileNotFoundError:
+    # Fallback to enhanced data (already has sentence-level changes)
+    print("  Not found. Trying data_enhanced_with_changes.csv...")
+    df = pd.read_csv('data_enhanced_with_changes.csv')
+    print("  ✓ Loaded enhanced data (will add word-level features)")
 
 # Parse dates
 df['Date'] = pd.to_datetime(df['Date'])
-df['Release Date'] = pd.to_datetime(df['Release Date'])
+if 'Release Date' in df.columns:
+    df['Release Date'] = pd.to_datetime(df['Release Date'])
 
 # Sort by date
 df = df.sort_values('Date').reset_index(drop=True)
@@ -200,6 +213,10 @@ try:
     comm_df = pd.read_csv('communications.csv')
     comm_df['Date'] = pd.to_datetime(comm_df['Date'])
 
+    # Filter to ONLY Statements (not Minutes)
+    comm_df = comm_df[comm_df['Type'] == 'Statement'].copy()
+    print(f"  Filtered to {len(comm_df)} Statements (excluded Minutes)")
+
     # Merge to get text
     df = df.merge(comm_df[['Date', 'Text']], on='Date', how='left')
     print(f"✓ Merged with communications data")
@@ -211,6 +228,8 @@ except Exception as e:
 # Add change features
 if 'Text' in df.columns and df['Text'].notna().sum() > 0:
     print("\nComputing change detection features...")
+    print("  - Sentence-level changes (existing)")
+    print("  - Word-level linguistic features (NEW!)")
 
     all_change_features = []
 
@@ -222,7 +241,14 @@ if 'Text' in df.columns and df['Text'].notna().sum() > 0:
             current_text = df.loc[idx, 'Text']
             previous_text = df.loc[idx-1, 'Text']
 
+            # Sentence-level changes (existing)
             changes = detect_statement_changes(current_text, previous_text)
+
+            # Word-level linguistic features (NEW!)
+            subtle_features = SubtleLinguisticAnalyzer.analyze_all(current_text, previous_text)
+
+            # Combine both
+            changes.update(subtle_features)
             all_change_features.append(changes)
 
     # Convert to DataFrame and concatenate
@@ -230,6 +256,7 @@ if 'Text' in df.columns and df['Text'].notna().sum() > 0:
     df = pd.concat([df, change_df], axis=1)
 
     print(f"✓ Added {len(change_df.columns)} change detection features")
+    print(f"  (Includes ~32 sentence-level + ~20 word-level features)")
 else:
     print("⚠ No text data available, skipping change detection")
 
@@ -314,6 +341,7 @@ print("\nPreparing feature matrix...")
 # Select features
 feature_cols = [col for col in df.columns if (
     col.startswith('change_') or
+    col.startswith('subtle_') or  # NEW: Word-level linguistic features!
     col.startswith('gpt_') or
     col.startswith('bart_') or
     col.startswith('finbert_') or

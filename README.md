@@ -16,7 +16,7 @@ This project analyzes FOMC statements (2000-2025) to predict Treasury market rea
 
 ```
 fomc_analysis_utils.py       # Main utility library (ChangeDetector, data loaders, market calculators)
-train_models.py              # Complete training pipeline with time-series CV and SHAP analysis
+run_analysis.py              # Complete training pipeline with time-series CV and SHAP analysis
 FOMC_Enhanced_Research.ipynb # Research notebook
 requirements_enhanced.txt    # Python dependencies
 .gitignore                   # Git ignore rules
@@ -42,7 +42,7 @@ You need to provide:
 
 ### 3. Run Complete Analysis
 ```bash
-python train_models.py
+python run_analysis.py
 ```
 
 This will:
@@ -154,7 +154,7 @@ final_data = MarketReactionCalculator.compute_reactions(
     horizons=[1, 2]
 )
 
-# 5. Train models (see train_models.py for complete pipeline)
+# 5. Train models (see run_analysis.py for complete pipeline)
 ```
 
 ## Expected Results
@@ -208,7 +208,7 @@ Academic research project. Please cite if you use this methodology.
 ## Next Steps
 
 1. **Find data**: Search GitHub/Kaggle for FOMC statements dataset
-2. **Run analysis**: `python train_models.py`
+2. **Run analysis**: `python run_analysis.py`
 3. **Generate results**: Review output files and SHAP plots
 4. **Start writing**: Use results to draft academic paper
 5. **Submit**: Target conferences first (AFA, WFA, NBER), then journals
@@ -220,4 +220,4 @@ Academic research project. Please cite if you use this methodology.
 **Questions?**
 - Technical implementation → See `fomc_analysis_utils.py`
 - Research strategy → See `RESEARCH_ROADMAP.md`
-- Just run it → `python train_models.py`
+- Just run it → `python run_analysis.py`
