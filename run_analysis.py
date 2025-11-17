@@ -67,13 +67,23 @@ print("\n" + "="*70)
 print("STEP 1: LOADING DATA")
 print("="*70)
 
-# Load existing features
-print("\nLoading data_with_gpt_bart_finbert.csv...")
-df = pd.read_csv('data_with_gpt_bart_finbert.csv')
+# Load existing features - try multiple sources
+print("\nAttempting to load data...")
+try:
+    # Try original NLP-enhanced data first
+    print("  Trying data_with_gpt_bart_finbert.csv...")
+    df = pd.read_csv('data_with_gpt_bart_finbert.csv')
+    print("  ✓ Loaded base NLP data")
+except FileNotFoundError:
+    # Fallback to enhanced data (already has sentence-level changes)
+    print("  Not found. Trying data_enhanced_with_changes.csv...")
+    df = pd.read_csv('data_enhanced_with_changes.csv')
+    print("  ✓ Loaded enhanced data (will add word-level features)")
 
 # Parse dates
 df['Date'] = pd.to_datetime(df['Date'])
-df['Release Date'] = pd.to_datetime(df['Release Date'])
+if 'Release Date' in df.columns:
+    df['Release Date'] = pd.to_datetime(df['Release Date'])
 
 # Sort by date
 df = df.sort_values('Date').reset_index(drop=True)
