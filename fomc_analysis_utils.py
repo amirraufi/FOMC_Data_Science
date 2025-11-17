@@ -259,6 +259,10 @@ class ChangeDetector:
         """
         Add change detection features to DataFrame
         Compares each statement to the previous one
+
+        Now includes BOTH:
+        - Sentence-level changes (what we had before)
+        - Word-level linguistic features (NEW - the subtle stuff!)
         """
         df = df.copy()
         df = df.sort_values('Date').reset_index(drop=True)
@@ -272,14 +276,264 @@ class ChangeDetector:
                 current_text = df.loc[idx, 'Text']
                 previous_text = df.loc[idx-1, 'Text']
 
+                # Sentence-level changes
                 changes = ChangeDetector.detect_changes(current_text, previous_text)
+
+                # Word-level linguistic features (NEW!)
+                subtle_features = SubtleLinguisticAnalyzer.analyze_all(current_text, previous_text)
+
+                # Combine both
+                changes.update(subtle_features)
                 all_change_features.append(changes)
 
         change_df = pd.DataFrame(all_change_features)
         df = pd.concat([df, change_df], axis=1)
 
         print(f"✓ Added {len(change_df.columns)} change detection features")
+        print(f"  (Includes sentence-level + word-level linguistic features)")
         return df
+
+
+class SubtleLinguisticAnalyzer:
+    """
+    Detect WORD-LEVEL linguistic changes between FOMC statements
+
+    Fed language is rigid, so SUBTLE word changes matter:
+    - 'transitory' → 'persistent' (policy shift)
+    - 'may' → 'will' (certainty change)
+    - 'elevated' → 'very elevated' (intensity change)
+    - Adding/removing 'not' (negation)
+    - Present → Future tense (forward guidance)
+
+    This class captures these subtle shifts that sentence-level analysis misses.
+    """
+
+    # Define word lists for different categories
+    HEDGE_WORDS = {
+        'may', 'might', 'could', 'possibly', 'likely', 'probably',
+        'perhaps', 'potentially', 'appears', 'seems', 'suggests'
+    }
+
+    CERTAINTY_WORDS = {
+        'will', 'shall', 'must', 'certainly', 'definitely',
+        'clearly', 'expect', 'expects', 'expected', 'determined'
+    }
+
+    NEGATION_WORDS = {
+        'not', 'no', 'neither', 'nor', 'never', 'none', 'nobody', 'nothing'
+    }
+
+    # Fed-specific word substitutions that signal policy shifts
+    FED_WORD_SUBSTITUTIONS = {
+        # Inflation timeline
+        'transitory': {'intensity': 1, 'category': 'inflation_duration'},
+        'temporary': {'intensity': 2, 'category': 'inflation_duration'},
+        'persistent': {'intensity': 3, 'category': 'inflation_duration'},
+
+        # Forward guidance
+        'patient': {'intensity': 1, 'category': 'policy_stance'},
+        'data-dependent': {'intensity': 2, 'category': 'policy_stance'},
+        'data dependent': {'intensity': 2, 'category': 'policy_stance'},
+        'expeditious': {'intensity': 3, 'category': 'policy_stance'},
+
+        # Rate path speed
+        'gradual': {'intensity': 1, 'category': 'rate_path'},
+        'measured': {'intensity': 2, 'category': 'rate_path'},
+        'rapid': {'intensity': 3, 'category': 'rate_path'},
+
+        # Policy necessity
+        'appropriate': {'intensity': 1, 'category': 'policy_urgency'},
+        'warranted': {'intensity': 2, 'category': 'policy_urgency'},
+        'necessary': {'intensity': 3, 'category': 'policy_urgency'},
+
+        # Inflation descriptors
+        'moderating': {'intensity': 1, 'category': 'inflation_level'},
+        'elevated': {'intensity': 2, 'category': 'inflation_level'},
+        'high': {'intensity': 3, 'category': 'inflation_level'},
+        'very high': {'intensity': 4, 'category': 'inflation_level'},
+    }
+
+    # Adjective intensifiers
+    INTENSIFIERS = {'very', 'highly', 'extremely', 'significantly', 'substantially', 'considerably'}
+    DIMINISHERS = {'somewhat', 'slightly', 'moderately', 'relatively', 'fairly'}
+
+    @staticmethod
+    def count_word_category(text, word_set):
+        """Count occurrences of words from a specific category"""
+        if pd.isna(text):
+            return 0
+
+        words = text.lower().split()
+        return sum(1 for word in words if word in word_set)
+
+    @staticmethod
+    def detect_hedge_certainty_changes(current_text, previous_text):
+        """
+        Track changes in hedge vs certainty language
+
+        More hedging = less certain = potentially dovish
+        More certainty = more confident = potentially hawkish
+        """
+        curr_hedge = SubtleLinguisticAnalyzer.count_word_category(current_text, SubtleLinguisticAnalyzer.HEDGE_WORDS)
+        prev_hedge = SubtleLinguisticAnalyzer.count_word_category(previous_text, SubtleLinguisticAnalyzer.HEDGE_WORDS)
+
+        curr_cert = SubtleLinguisticAnalyzer.count_word_category(current_text, SubtleLinguisticAnalyzer.CERTAINTY_WORDS)
+        prev_cert = SubtleLinguisticAnalyzer.count_word_category(previous_text, SubtleLinguisticAnalyzer.CERTAINTY_WORDS)
+
+        return {
+            'subtle_hedge_word_count_current': curr_hedge,
+            'subtle_hedge_word_count_change': curr_hedge - prev_hedge,
+            'subtle_certainty_word_count_current': curr_cert,
+            'subtle_certainty_word_count_change': curr_cert - prev_cert,
+            'subtle_hedge_certainty_ratio': curr_hedge / max(curr_cert, 1),  # Avoid division by zero
+        }
+
+    @staticmethod
+    def detect_word_substitutions(current_text, previous_text):
+        """
+        Track Fed-specific word substitutions that signal policy shifts
+
+        Example: 'transitory' → 'persistent' inflation = major shift!
+        """
+        if pd.isna(current_text) or pd.isna(previous_text):
+            return {}
+
+        curr_lower = current_text.lower()
+        prev_lower = previous_text.lower()
+
+        features = {}
+
+        # Track each category
+        for category in ['inflation_duration', 'policy_stance', 'rate_path', 'policy_urgency', 'inflation_level']:
+            curr_intensity = 0
+            prev_intensity = 0
+            curr_found = False
+            prev_found = False
+
+            for word, info in SubtleLinguisticAnalyzer.FED_WORD_SUBSTITUTIONS.items():
+                if info['category'] == category:
+                    if word in curr_lower:
+                        curr_intensity = max(curr_intensity, info['intensity'])
+                        curr_found = True
+                    if word in prev_lower:
+                        prev_intensity = max(prev_intensity, info['intensity'])
+                        prev_found = True
+
+            # Calculate intensity change
+            if curr_found or prev_found:
+                features[f'subtle_{category}_intensity_change'] = curr_intensity - prev_intensity
+                features[f'subtle_{category}_intensity_current'] = curr_intensity
+
+        return features
+
+    @staticmethod
+    def detect_adjective_intensity_changes(current_text, previous_text):
+        """
+        Track if adjectives got stronger (very, highly) or weaker (somewhat, slightly)
+
+        'Inflation is elevated' → 'Inflation is very elevated' = hawkish shift
+        """
+        if pd.isna(current_text) or pd.isna(previous_text):
+            return {}
+
+        curr_lower = current_text.lower()
+        prev_lower = previous_text.lower()
+
+        curr_intensifiers = SubtleLinguisticAnalyzer.count_word_category(current_text, SubtleLinguisticAnalyzer.INTENSIFIERS)
+        prev_intensifiers = SubtleLinguisticAnalyzer.count_word_category(previous_text, SubtleLinguisticAnalyzer.INTENSIFIERS)
+
+        curr_diminishers = SubtleLinguisticAnalyzer.count_word_category(current_text, SubtleLinguisticAnalyzer.DIMINISHERS)
+        prev_diminishers = SubtleLinguisticAnalyzer.count_word_category(previous_text, SubtleLinguisticAnalyzer.DIMINISHERS)
+
+        return {
+            'subtle_intensifier_count_change': curr_intensifiers - prev_intensifiers,
+            'subtle_diminisher_count_change': curr_diminishers - prev_diminishers,
+            'subtle_net_intensity_change': (curr_intensifiers - curr_diminishers) - (prev_intensifiers - prev_diminishers),
+        }
+
+    @staticmethod
+    def detect_negation_changes(current_text, previous_text):
+        """
+        Track added/removed negations
+
+        'Risks are balanced' → 'Risks are not balanced' = huge meaning flip!
+        """
+        if pd.isna(current_text) or pd.isna(previous_text):
+            return {}
+
+        curr_neg = SubtleLinguisticAnalyzer.count_word_category(current_text, SubtleLinguisticAnalyzer.NEGATION_WORDS)
+        prev_neg = SubtleLinguisticAnalyzer.count_word_category(previous_text, SubtleLinguisticAnalyzer.NEGATION_WORDS)
+
+        return {
+            'subtle_negation_count_current': curr_neg,
+            'subtle_negation_count_change': curr_neg - prev_neg,
+        }
+
+    @staticmethod
+    def detect_verb_tense_changes(current_text, previous_text):
+        """
+        Track verb tense shifts (simple rule-based approach)
+
+        'Inflation is elevated' → 'Inflation will ease' = forward guidance change
+
+        Note: This is a simplified version. For production, consider using spaCy POS tagging.
+        """
+        if pd.isna(current_text) or pd.isna(previous_text):
+            return {}
+
+        # Simple indicators for different tenses
+        future_indicators = ['will', 'shall', 'going to', 'expect to', 'plan to', 'intend to']
+        present_indicators = [' is ', ' are ', ' remains ', ' continues ']
+        past_indicators = [' was ', ' were ', ' has ', ' have ', ' had ']
+
+        curr_lower = ' ' + current_text.lower() + ' '
+        prev_lower = ' ' + previous_text.lower() + ' '
+
+        curr_future = sum(1 for ind in future_indicators if ind in curr_lower)
+        prev_future = sum(1 for ind in future_indicators if ind in prev_lower)
+
+        curr_present = sum(1 for ind in present_indicators if ind in curr_lower)
+        prev_present = sum(1 for ind in present_indicators if ind in prev_lower)
+
+        curr_past = sum(1 for ind in past_indicators if ind in curr_lower)
+        prev_past = sum(1 for ind in past_indicators if ind in prev_lower)
+
+        return {
+            'subtle_future_tense_count_change': curr_future - prev_future,
+            'subtle_present_tense_count_change': curr_present - prev_present,
+            'subtle_past_tense_count_change': curr_past - prev_past,
+            'subtle_future_present_ratio': curr_future / max(curr_present, 1),
+        }
+
+    @staticmethod
+    def analyze_all(current_text, previous_text):
+        """
+        Run all word-level linguistic analyses
+
+        Returns:
+            Dictionary with all subtle linguistic features
+        """
+        if pd.isna(current_text) or pd.isna(previous_text):
+            return {}
+
+        features = {}
+
+        # 1. Hedge vs Certainty
+        features.update(SubtleLinguisticAnalyzer.detect_hedge_certainty_changes(current_text, previous_text))
+
+        # 2. Word Substitutions
+        features.update(SubtleLinguisticAnalyzer.detect_word_substitutions(current_text, previous_text))
+
+        # 3. Adjective Intensity
+        features.update(SubtleLinguisticAnalyzer.detect_adjective_intensity_changes(current_text, previous_text))
+
+        # 4. Negation
+        features.update(SubtleLinguisticAnalyzer.detect_negation_changes(current_text, previous_text))
+
+        # 5. Verb Tense
+        features.update(SubtleLinguisticAnalyzer.detect_verb_tense_changes(current_text, previous_text))
+
+        return features
 
 
 class TimeSeriesSplitter:
@@ -444,10 +698,12 @@ if __name__ == "__main__":
     print("\nAvailable classes:")
     print("  - FOMCDataLoader: Load communications and market data")
     print("  - MarketReactionCalculator: Calculate market reactions")
-    print("  - ChangeDetector: Detect statement-to-statement changes")
+    print("  - ChangeDetector: Detect statement-to-statement changes (sentence-level)")
+    print("  - SubtleLinguisticAnalyzer: Detect word-level linguistic changes (NEW!)")
     print("  - TimeSeriesSplitter: Create train/val/holdout splits")
     print("  - ModelEvaluator: Evaluate models with CV")
     print("\nExample usage:")
     print("  from fomc_analysis_utils import FOMCDataLoader, ChangeDetector")
     print("  loader = FOMCDataLoader('communications.csv')")
     print("  df = loader.load_communications()")
+    print("\nNEW: Word-level features now included automatically in ChangeDetector!")
