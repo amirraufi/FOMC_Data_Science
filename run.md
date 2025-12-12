@@ -1,4 +1,5 @@
 # Quick Start
+Just copy and paste each step in your termina:)
 
 ## Step 1: Clone the repo
 ```bash
